@@ -1,4 +1,4 @@
-// game.js - Passo 4: Adicionando Feedback Dinâmico ao Jogador
+// game.js - O Gran Finale: Sistema de Pontuação (Versão Completa)
 
 class PizzaScene extends Phaser.Scene {
     constructor() {
@@ -16,91 +16,162 @@ class PizzaScene extends Phaser.Scene {
         this.load.image('pizza_calabresa', 'assets/pizza_calabresa.png'); 
         this.load.image('calabresa_icone', 'assets/calabresa_icone.png');
         this.load.image('finalizar_btn', 'assets/finalizar_btn.png');
+        this.load.image('comanda', 'assets/comanda.png');
+        this.load.image('novo_pedido_btn', 'assets/novo_pedido_btn.png');
+        this.load.image('calabresa_unidade', 'assets/calabresa_unidade.png');
+        this.load.image('forno_desligado', 'assets/forno_desligado.png');
+        this.load.image('forno_ligado', 'assets/forno_ligado.png');
     }
 
     create() {
         console.log("O jogo começou!");
         this.add.image(this.cameras.main.width / 2, this.cameras.main.height / 2, 'background');
-        
-        this.pizza = this.add.image(this.cameras.main.width / 2, this.cameras.main.height / 2, 'pizza_base');
-        
-        this.gameState = {
-            temMolho: false,
-            temQueijo: false,
-            temCalabresa: false
+
+        this.sceneLayout = {
+            pizza: { x: this.cameras.main.width / 2, y: this.cameras.main.height / 2, scale: 1.0, validRadius: 140 },
+            forno: { x: (this.cameras.main.width / 2) - 500, y: 500, scale: 0.7 },
+            uiTop: { comanda: { x: config.width - 180, y: 260, scale: 1.0 }, textoPedido: { style: { fontSize: '24px', fill: '#000' }, ingredientes: { x_offset: -115, y_offset: -76 }, calabresas:   { x_offset: -115, y_offset: -32 }}, botaoNovoPedido: { x: config.width - 43, y: 120, scale: 0.3 }},
+            uiBottomBar: { baseY: 600, startX: 530, spacing: 150, molho: { scale: 0.4 }, queijo: { scale: 0.4 }, calabresa: { scale: 0.2 }, botaoFinalizar: { x: config.width - 200, y: 600, scale: 0.7 }},
+            toppings: { calabresa: { scale: 0.1 } }
         };
+        
+        this.pizzaContainer = this.add.container(this.sceneLayout.pizza.x, this.sceneLayout.pizza.y);
+        const pizzaBase = this.add.image(0, 0, 'pizza_base');
+        this.pizzaBase = pizzaBase;
+        this.pizzaContainer.add(this.pizzaBase);
+        this.pizzaContainer.setSize(this.pizzaBase.width, this.pizzaBase.height);
+        this.pizzaContainer.setInteractive();
 
-        const style = { fontSize: '32px', fill: '#FFF', stroke: '#000', strokeThickness: 5 };
-        this.textoInstrucao = this.add.text(50, 120, '', style);
+        this.toppingsGroup = this.add.group();
+        this.gameState = {};
+        this.pedidoAtual = {};
 
-        let botaoMolho = this.add.image(150, 600, 'molho_icone').setInteractive().setScale(0.5);
-        botaoMolho.on('pointerdown', () => {
-            if (!this.gameState.temMolho) {
-                this.pizza.setTexture('pizza_molho');
-                this.gameState.temMolho = true;
-                this.atualizarTextoDeInstrucao();
+        this.fornoImg = this.add.image(this.sceneLayout.forno.x, this.sceneLayout.forno.y, 'forno_desligado').setScale(this.sceneLayout.forno.scale);
+        const zonaForno = this.add.zone(this.fornoImg.x, this.fornoImg.y, this.fornoImg.width * this.sceneLayout.forno.scale, this.fornoImg.height * this.sceneLayout.forno.scale).setRectangleDropZone(this.fornoImg.width * this.sceneLayout.forno.scale, this.fornoImg.height * this.sceneLayout.forno.scale);
+        
+        this.progressBar = this.add.graphics().setVisible(false);
+        this.progressBox = this.add.graphics().setVisible(false);
+        this.bakingTimer = null;
+
+        this.pontuacaoTotal = 0;
+        this.textoPontuacao = this.add.text(50, 50, 'Pontos: 0', { fontSize: '32px', fill: '#FFF', stroke: '#000', strokeThickness: 5 });
+
+        const uiTop = this.sceneLayout.uiTop;
+        this.add.image(uiTop.comanda.x, uiTop.comanda.y, 'comanda').setScale(uiTop.comanda.scale);
+        this.textoPedidoIngredientes = this.add.text(uiTop.comanda.x + uiTop.textoPedido.ingredientes.x_offset, uiTop.comanda.y + uiTop.textoPedido.ingredientes.y_offset, '', uiTop.textoPedido.style);
+        this.textoPedidoCalabresas = this.add.text(uiTop.comanda.x + uiTop.textoPedido.calabresas.x_offset, uiTop.comanda.y + uiTop.textoPedido.calabresas.y_offset, '', uiTop.textoPedido.style);
+        const botaoNovoPedido = this.add.image(uiTop.botaoNovoPedido.x, uiTop.botaoNovoPedido.y, 'novo_pedido_btn').setInteractive().setScale(uiTop.botaoNovoPedido.scale);
+        
+        const bottomBar = this.sceneLayout.uiBottomBar;
+        let botaoMolho = this.add.image(bottomBar.startX, bottomBar.baseY, 'molho_icone').setInteractive().setScale(bottomBar.molho.scale);
+        let botaoQueijo = this.add.image(bottomBar.startX + bottomBar.spacing, bottomBar.baseY, 'queijo_icone').setInteractive().setScale(bottomBar.queijo.scale);
+        let botaoCalabresa = this.add.image(bottomBar.startX + (bottomBar.spacing * 2), bottomBar.baseY, 'calabresa_icone').setInteractive().setScale(bottomBar.calabresa.scale);
+        this.botaoFinalizar = this.add.image(bottomBar.botaoFinalizar.x, bottomBar.botaoFinalizar.y, 'finalizar_btn').setInteractive().setScale(bottomBar.botaoFinalizar.scale).setVisible(false);
+
+        this.input.setDraggable(this.pizzaContainer, false);
+
+        this.input.on('dragstart', (pointer, gameObject) => { if (gameObject === this.pizzaContainer) { this.fornoImg.setTexture('forno_desligado'); }});
+        this.input.on('drag', (pointer, gameObject, dragX, dragY) => { gameObject.x = dragX; gameObject.y = dragY; });
+        this.input.on('drop', (pointer, container, zona) => { if (container === this.pizzaContainer) { this.fornoImg.setTexture('forno_ligado'); container.setVisible(false); this.iniciarCozimento(5000); }});
+
+        botaoNovoPedido.on('pointerdown', () => { this.gerarNovoPedido(); });
+        botaoMolho.on('pointerdown', () => { if (!this.gameState.molhoAplicado) { this.pizzaBase.setTexture('pizza_molho'); this.gameState.molhoAplicado = true; }});
+        botaoQueijo.on('pointerdown', () => { if (this.gameState.molhoAplicado && !this.gameState.queijoAplicado) { this.pizzaBase.setTexture('pizza_queijo'); this.gameState.queijoAplicado = true; }});
+        botaoCalabresa.on('pointerdown', () => { if (this.gameState.queijoAplicado) { this.gameState.ingredienteSelecionado = 'calabresa'; }});
+
+        this.pizzaContainer.on('pointerdown', (pointer) => {
+            const clickX = pointer.x;
+            const clickY = pointer.y;
+            if (this.gameState.ingredienteSelecionado === 'calabresa') {
+                const distance = Phaser.Math.Distance.Between(clickX, clickY, this.pizzaContainer.x, this.pizzaContainer.y);
+                if (distance <= this.sceneLayout.pizza.validRadius) {
+                    const localClickX = clickX - this.pizzaContainer.x;
+                    const localClickY = clickY - this.pizzaContainer.y;
+                    const topping = this.add.image(localClickX, localClickY, 'calabresa_unidade');
+                    topping.setScale(this.sceneLayout.toppings.calabresa.scale);
+                    this.pizzaContainer.add(topping);
+                    this.toppingsGroup.add(topping);
+                    this.gameState.calabresasColocadas++;
+                    
+                    if (this.gameState.calabresasColocadas >= this.pedidoAtual.calabresas) {
+                        this.gameState.ingredienteSelecionado = 'nenhum';
+                        this.input.setDraggable(this.pizzaContainer, true);
+                    }
+                }
             }
-        });
-
-        let botaoQueijo = this.add.image(300, 600, 'queijo_icone').setInteractive().setScale(0.5);
-        botaoQueijo.on('pointerdown', () => {
-            if (this.gameState.temMolho === true && !this.gameState.temQueijo) {
-                this.pizza.setTexture('pizza_queijo');
-                this.gameState.temQueijo = true; 
-                this.atualizarTextoDeInstrucao();
-            }
-        });
-
-        let botaoCalabresa = this.add.image(450, 600, 'calabresa_icone').setInteractive().setScale(0.2);
-        botaoCalabresa.on('pointerdown', () => {
-            if (this.gameState.temQueijo === true && !this.gameState.temCalabresa) {
-                this.pizza.setTexture('pizza_calabresa');
-                this.gameState.temCalabresa = true;
-                this.botaoFinalizar.setVisible(true);
-                this.atualizarTextoDeInstrucao();
-            }
-        });
-
-        this.botaoFinalizar = this.add.image(config.width - 200, 600, 'finalizar_btn').setInteractive().setVisible(false);
-        this.botaoFinalizar.on('pointerdown', () => {
-            console.log("Pedido finalizado! Resetando...");
-            this.pizza.setTexture('pizza_base');
-            this.gameState = { temMolho: false, temQueijo: false, temCalabresa: false };
-            this.botaoFinalizar.setVisible(false);
-            this.atualizarTextoDeInstrucao();
         });
         
-        this.add.text(50, 50, 'Crônicas da Pizzaria', { fontSize: '48px', fill: '#FFF', stroke: '#000', strokeThickness: 6 });
+        this.botaoFinalizar.on('pointerdown', () => {
+            this.calcularPontuacao();
+            this.gerarNovoPedido(); 
+        });
+        
+        this.gerarNovoPedido();
+    }
 
-        this.atualizarTextoDeInstrucao();
+    iniciarCozimento(duracao) {
+        this.progressBox.setVisible(true);
+        this.progressBox.fillStyle(0x222222, 0.8);
+        this.progressBox.fillRect(this.sceneLayout.forno.x - 150, this.sceneLayout.forno.y - 100, 300, 30);
+        this.progressBar.setVisible(true);
+        this.bakingTimer = this.time.addEvent({ delay: duracao, callback: this.onBakeComplete, callbackScope: this });
+    }
+
+    onBakeComplete() {
+        console.log("Pizza assada!");
+        this.bakingTimer = null;
+        this.progressBar.clear();
+        this.progressBox.setVisible(false);
+        this.pizzaContainer.setVisible(true);
+        this.pizzaContainer.setPosition(this.sceneLayout.pizza.x, this.sceneLayout.pizza.y);
+        this.input.setDraggable(this.pizzaContainer, true);
+        this.gameState.pizzaAssada = true;
+        this.botaoFinalizar.setVisible(true);
+        this.fornoImg.setTexture('forno_desligado');
     }
 
     update() {
-        // ...
+        if (this.bakingTimer) {
+            const progresso = this.bakingTimer.getProgress();
+            this.progressBar.clear();
+            this.progressBar.fillStyle(0x00ff00, 1);
+            this.progressBar.fillRect(this.sceneLayout.forno.x - 145, this.sceneLayout.forno.y - 95, 290 * progresso, 20);
+        }
     }
 
-    atualizarTextoDeInstrucao() {
-        if (!this.gameState.temMolho) {
-            this.textoInstrucao.setText('Passo 1: Adicione o molho.');
-        } else if (!this.gameState.temQueijo) {
-            this.textoInstrucao.setText('Passo 2: Adicione o queijo.');
-        } else if (!this.gameState.temCalabresa) {
-            this.textoInstrucao.setText('Passo 3: Adicione a calabresa.');
-        } else {
-            this.textoInstrucao.setText('Pizza pronta! Finalize o pedido.');
-        }
+    calcularPontuacao() {
+        let pontuacaoDoPedido = 100;
+        let erros = [];
+        if (!this.gameState.molhoAplicado) { pontuacaoDoPedido -= 25; erros.push("esqueceu o molho"); }
+        if (!this.gameState.queijoAplicado) { pontuacaoDoPedido -= 25; erros.push("esqueceu o queijo"); }
+        const diffCalabresas = Math.abs(this.gameState.calabresasColocadas - this.pedidoAtual.calabresas);
+        if (diffCalabresas > 0) { pontuacaoDoPedido -= diffCalabresas * 5; erros.push(`errou a calabresa por ${diffCalabresas}`); }
+        if (!this.gameState.pizzaAssada) { pontuacaoDoPedido -= 50; erros.push("pizza crua!"); }
+        if (pontuacaoDoPedido < 0) { pontuacaoDoPedido = 0; }
+        console.log(`Pontuação do pedido: ${pontuacaoDoPedido}. Erros: ${erros.join(', ')}`);
+        this.pontuacaoTotal += pontuacaoDoPedido;
+        this.textoPontuacao.setText(`Pontos: ${this.pontuacaoTotal}`);
+    }
+
+    gerarNovoPedido() {
+        console.log("Gerando novo pedido...");
+        this.toppingsGroup.clear(true, true);
+        this.pizzaBase.setTexture('pizza_base');
+        this.pizzaContainer.setVisible(true);
+        this.pizzaContainer.x = this.sceneLayout.pizza.x;
+        this.pizzaContainer.y = this.sceneLayout.pizza.y;
+        this.botaoFinalizar.setVisible(false);
+        this.input.setDraggable(this.pizzaContainer, false);
+        if(this.progressBar) this.progressBar.clear();
+        if(this.progressBox) this.progressBox.setVisible(false);
+        if(this.bakingTimer) this.bakingTimer.remove();
+        this.bakingTimer = null;
+        this.pedidoAtual = { molho: true, queijo: true, calabresas: Phaser.Math.Between(3, 8) };
+        this.gameState = { molhoAplicado: false, queijoAplicado: false, ingredienteSelecionado: 'nenhum', calabresasColocadas: 0, pizzaAssada: false };
+        this.textoPedidoIngredientes.setText('- Molho\n- Queijo');
+        this.textoPedidoCalabresas.setText(`- Calabresas: ${this.pedidoAtual.calabresas}`);
     }
 }
 
-const config = {
-    type: Phaser.AUTO,
-    width: 1368,
-    height: 720,
-    scale: {
-        mode: Phaser.Scale.ENVELOP,
-        autoCenter: Phaser.Scale.CENTER_BOTH
-    },
-    scene: [PizzaScene] 
-};
-
+const config = { type: Phaser.AUTO, width: 1368, height: 720, scale: { mode: Phaser.Scale.ENVELOP, autoCenter: 'both' }, scene: [PizzaScene] };
 const game = new Phaser.Game(config);
