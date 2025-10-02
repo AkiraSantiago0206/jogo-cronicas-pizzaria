@@ -1,6 +1,5 @@
 // js/main.js
 
-// A configuração do jogo
 const config = {
     type: Phaser.AUTO,
     width: 1368,
@@ -9,8 +8,8 @@ const config = {
         mode: Phaser.Scale.ENVELOP,
         autoCenter: 'both'
     },
-    // A lista de todas as cenas que nosso jogo terá. Por enquanto, só uma.
-    scene: [ GameScene ] 
+    // A lista completa de cenas. A primeira da lista é a que inicia o jogo.
+    scene: [ MainMenuScene, GameScene, GameOverScene ] 
 };
 
 // Inicia o jogo
